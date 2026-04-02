@@ -10,6 +10,7 @@ import requests
 TIMEOUT = 10
 TELEGRAM_MESSAGE_LIMIT = 4096
 SUPPORTED_DOMAINS = ("glados.one", "glados.network", "glados.cloud")
+CHECKIN_TOKEN = "glados.one"
 
 HEADERS_BASE = {
     "user-agent": (
@@ -65,7 +66,7 @@ def build_site_request(domain: str, cookie: str) -> dict:
         "domain": domain,
         "checkin_url": f"{base_url}/api/user/checkin",
         "status_url": f"{base_url}/api/user/status",
-        "payload": {"token": domain},
+        "payload": {"token": CHECKIN_TOKEN},
         "headers": headers,
     }
 
@@ -89,6 +90,8 @@ def try_checkin(session: requests.Session, cookie: str, domains: List[str]) -> d
         response_data = safe_json(response)
         message = response_data.get("message", "")
         if not message:
+            continue
+        if "token error" in message.lower():
             continue
 
         status, is_success, is_fail, is_repeat = get_status_text(message)
