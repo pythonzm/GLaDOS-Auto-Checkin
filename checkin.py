@@ -1,18 +1,17 @@
-import os
 import json
-import time
+import os
 import random
+import time
+from typing import List, Tuple
+
 import requests
-from pypushdeer import PushDeer
-from urllib.parse import quote
 
 
-CHECKIN_URL = "https://glados.cloud/api/user/checkin"
-STATUS_URL = "https://glados.cloud/api/user/status"
+TIMEOUT = 10
+TELEGRAM_MESSAGE_LIMIT = 4096
+SUPPORTED_DOMAINS = ("glados.one", "glados.network", "glados.cloud")
 
 HEADERS_BASE = {
-    "origin": "https://glados.cloud",
-    "referer": "https://glados.cloud/console/checkin",
     "user-agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -21,132 +20,242 @@ HEADERS_BASE = {
     "content-type": "application/json;charset=UTF-8",
 }
 
-PAYLOAD = {"token": "glados.cloud"}
-TIMEOUT = 10
 
-
-def push_deer(sckey: str, title: str, text: str):
-    """推送消息到 PushDeer"""
-    if sckey:
-        PushDeer(pushkey=sckey).send_text(title, desp=text)
-
-
-def push_serverchan(sendkey: str, title: str, content: str):
-    """推送消息到 Server 酱 (Turbo 版)"""
-    if not sendkey:
-        return
-    
-    # Server 酱 Turbo 版 API
-    url = f"https://sctapi.ftqq.com/{sendkey}.send"
-    
-    data = {
-        "title": title,
-        "desp": content
-    }
-    
+def safe_json(response: requests.Response) -> dict:
+    """安全解析 JSON，失败时返回空字典。"""
     try:
-        resp = requests.post(url, data=data, timeout=TIMEOUT)
-        if resp.status_code == 200:
-            result = resp.json()
-            if result.get("code") == 0:
-                print("✅ Server 酱推送成功")
-            else:
-                print(f"⚠️ Server 酱推送失败: {result.get('message')}")
-        else:
-            print(f"⚠️ Server 酱推送失败: HTTP {resp.status_code}")
-    except Exception as e:
-        print(f"⚠️ Server 酱推送异常: {e}")
-
-
-def push_all(sendkey_deer: str, sendkey_sc: str, title: str, content: str):
-    """推送到所有配置的服务"""
-    # PushDeer 推送
-    if sendkey_deer:
-        push_deer(sendkey_deer, title, content)
-    
-    # Server 酱推送
-    if sendkey_sc:
-        push_serverchan(sendkey_sc, title, content)
-    
-    # 如果都没有配置，打印提醒
-    if not sendkey_deer and not sendkey_sc:
-        print("⚠️ 未配置任何推送服务，请在 Secrets 中配置 SENDKEY 或 SERVERCHAN_KEY")
-
-
-def safe_json(resp):
-    try:
-        return resp.json()
+        return response.json()
     except Exception:
         return {}
 
 
-def main():
-    # 获取推送密钥
-    sendkey_deer = os.getenv("SENDKEY", "")
-    sendkey_sc = os.getenv("SERVERCHAN_KEY", "")
+def normalize_domain(domain: str) -> str:
+    """标准化域名输入，兼容带协议头的配置。"""
+    normalized = domain.strip().lower()
+    if normalized.startswith("https://"):
+        normalized = normalized[8:]
+    elif normalized.startswith("http://"):
+        normalized = normalized[7:]
+    return normalized.split("/", 1)[0]
+
+
+def get_candidate_domains() -> List[str]:
+    """返回按优先级排序的候选站点列表。"""
+    preferred = normalize_domain(os.getenv("GLADOS_SITE", ""))
+    candidates: List[str] = []
+
+    if preferred:
+        candidates.append(preferred)
+
+    for domain in SUPPORTED_DOMAINS:
+        if domain not in candidates:
+            candidates.append(domain)
+
+    return candidates
+
+
+def build_site_request(domain: str, cookie: str) -> dict:
+    """构造指定站点的请求信息。"""
+    base_url = f"https://{domain}"
+    headers = dict(HEADERS_BASE)
+    headers["origin"] = base_url
+    headers["referer"] = f"{base_url}/console/checkin"
+    headers["cookie"] = cookie
+    return {
+        "domain": domain,
+        "checkin_url": f"{base_url}/api/user/checkin",
+        "status_url": f"{base_url}/api/user/status",
+        "payload": {"token": domain},
+        "headers": headers,
+    }
+
+
+def try_checkin(session: requests.Session, cookie: str, domains: List[str]) -> dict:
+    """按域名顺序尝试签到，命中后立即返回。"""
+    last_result = {}
+
+    for domain in domains:
+        request_data = build_site_request(domain, cookie)
+        try:
+            response = session.post(
+                request_data["checkin_url"],
+                headers=request_data["headers"],
+                data=json.dumps(request_data["payload"]),
+                timeout=TIMEOUT,
+            )
+        except Exception:
+            continue
+
+        response_data = safe_json(response)
+        message = response_data.get("message", "")
+        if not message:
+            continue
+
+        status, is_success, is_fail, is_repeat = get_status_text(message)
+        status_data = {}
+        try:
+            status_response = session.get(
+                request_data["status_url"],
+                headers=request_data["headers"],
+                timeout=TIMEOUT,
+            )
+            status_data = safe_json(status_response).get("data") or {}
+        except Exception:
+            status_data = {}
+
+        result = {
+            "domain": domain,
+            "checkin_data": response_data,
+            "status_data": status_data,
+            "status": status,
+            "is_success": is_success,
+            "is_fail": is_fail,
+            "is_repeat": is_repeat,
+        }
+        if status_data.get("email") or status_data.get("leftDays") is not None:
+            return result
+        if is_success or is_repeat:
+            return result
+        last_result = result
+
+    return last_result
+
+
+def split_telegram_message(title: str, content: str) -> List[str]:
+    """按 Telegram 单条消息长度限制拆分内容。"""
+    prefix = f"{title}\n\n"
+    if len(prefix) + len(content) <= TELEGRAM_MESSAGE_LIMIT:
+        return [prefix + content]
+
+    chunks: List[str] = []
+    current = prefix
+    for line in content.splitlines():
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) <= TELEGRAM_MESSAGE_LIMIT:
+            current = candidate
+            continue
+
+        if current:
+            chunks.append(current)
+        current = line
+
+    if current:
+        chunks.append(current)
+
+    return chunks or [prefix.strip()]
+
+
+def push_telegram(bot_token: str, chat_id: str, title: str, content: str) -> None:
+    """通过 Telegram Bot 推送签到结果。"""
+    if not bot_token or not chat_id:
+        print("⚠️ 未配置 Telegram Bot 推送，请设置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID")
+        return
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+
+    try:
+        for message in split_telegram_message(title, content):
+            response = requests.post(
+                url,
+                json={
+                    "chat_id": chat_id,
+                    "text": message,
+                    "disable_web_page_preview": True,
+                },
+                timeout=TIMEOUT,
+            )
+            result = safe_json(response)
+            if response.status_code == 200 and result.get("ok") is True:
+                continue
+
+            description = result.get("description", f"HTTP {response.status_code}")
+            print(f"⚠️ Telegram 推送失败: {description}")
+            return
+
+        print("✅ Telegram 推送成功")
+    except Exception as exc:
+        print(f"⚠️ Telegram 推送异常: {exc}")
+
+
+def get_status_text(message: str) -> Tuple[str, bool, bool, bool]:
+    """根据签到接口返回文案判断签到结果。"""
+    message_lower = message.lower()
+    if "got" in message_lower:
+        return "✅ 成功", True, False, False
+    if "repeat" in message_lower or "already" in message_lower:
+        return "🔁 已签到", False, False, True
+    return "❌ 失败", False, True, False
+
+
+def build_account_summary(
+    index: int, email: str, domain: str, status: str, points: str, days: str
+) -> str:
+    """格式化单个账号的汇总信息。"""
+    return (
+        f"{index}. {email} | {status} | 站点:{domain} | "
+        f"积分:{points} | 剩余天数:{days}"
+    )
+
+
+def main() -> None:
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     cookies_env = os.getenv("COOKIES", "")
-    cookies = [c.strip() for c in cookies_env.split("&") if c.strip()]
+    cookies = [cookie.strip() for cookie in cookies_env.split("&") if cookie.strip()]
+    domains = get_candidate_domains()
 
     if not cookies:
-        push_all(sendkey_deer, sendkey_sc, "GLaDOS 签到", "❌ 未检测到 COOKIES")
+        push_telegram(bot_token, chat_id, "GLaDOS 签到", "❌ 未检测到 COOKIES")
         return
 
     session = requests.Session()
-    ok = fail = repeat = 0
-    lines = []
+    success_count = 0
+    fail_count = 0
+    repeat_count = 0
+    lines: List[str] = []
 
-    for idx, cookie in enumerate(cookies, 1):
-        headers = dict(HEADERS_BASE)
-        headers["cookie"] = cookie
-
+    for index, cookie in enumerate(cookies, start=1):
         email = "unknown"
+        domain = "-"
         points = "-"
         days = "-"
 
-        try:
-            r = session.post(
-                CHECKIN_URL,
-                headers=headers,
-                data=json.dumps(PAYLOAD),
-                timeout=TIMEOUT,
-            )
+        result = try_checkin(session, cookie, domains)
+        if not result:
+            fail_count += 1
+            lines.append(build_account_summary(index, email, domain, "❌ 异常", points, days))
+            time.sleep(random.uniform(1, 2))
+            continue
 
-            j = safe_json(r)
-            msg = j.get("message", "")
-            msg_lower = msg.lower()
+        domain = result["domain"]
+        status = result["status"]
+        checkin_data = result["checkin_data"]
+        status_data = result.get("status_data") or {}
+        is_success = result["is_success"]
+        is_fail = result["is_fail"]
+        is_repeat = result["is_repeat"]
 
-            if "got" in msg_lower:
-                ok += 1
-                points = j.get("points", "-")
-                status = "✅ 成功"
-            elif "repeat" in msg_lower or "already" in msg_lower:
-                repeat += 1
-                status = "🔁 已签到"
-            else:
-                fail += 1
-                status = "❌ 失败"
+        if is_success:
+            success_count += 1
+            points = str(checkin_data.get("points", "-"))
+        if is_fail:
+            fail_count += 1
+        if is_repeat:
+            repeat_count += 1
 
-            # 状态接口（允许失败）
-            s = session.get(STATUS_URL, headers=headers, timeout=TIMEOUT)
-            sj = safe_json(s).get("data") or {}
-            email = sj.get("email", email)
-            if sj.get("leftDays") is not None:
-                days = f"{int(float(sj['leftDays']))} 天"
+        email = status_data.get("email", email)
+        left_days = status_data.get("leftDays")
+        if left_days is not None:
+            days = str(int(float(left_days)))
 
-        except Exception:
-            fail += 1
-            status = "❌ 异常"
-
-        lines.append(f"{idx}. {email} | {status} | P:{points} | 剩余:{days}")
+        lines.append(build_account_summary(index, email, domain, status, points, days))
         time.sleep(random.uniform(1, 2))
 
-    title = f"GLaDOS 签到完成 ✅{ok} ❌{fail} 🔁{repeat}"
+    title = f"GLaDOS 签到完成 ✅{success_count} ❌{fail_count} 🔁{repeat_count}"
     content = "\n".join(lines)
 
     print(content)
-    
-    # 推送消息到所有服务
-    push_all(sendkey_deer, sendkey_sc, title, content)
+    push_telegram(bot_token, chat_id, title, content)
 
 
 if __name__ == "__main__":

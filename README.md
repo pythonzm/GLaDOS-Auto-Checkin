@@ -1,124 +1,119 @@
-# 📌 GLaDOS  自动签到
+# GLaDOS 自动签到
 
-一个基于 **GitHub Actions** 的 **GLaDOS 自动签到脚本**。
- **无需服务器、无需编程基础**，每天自动帮你签到。
+这是一个基于 **GitHub Actions** 的 **GLaDOS 自动签到脚本**。
+无需服务器，也不需要额外常驻环境，仓库工作流会按计划自动执行签到。
 
-------
+---
 
-## ✨ 功能说明
+## 功能说明
 
-- ✅ **每天自动签到**
-- 🔁 **已签到自动识别，不会报错**
-- 👥 **支持多个账号**
-- 📬 **可选签到结果推送（PushDeer）**
-- 🆓 **完全免费，使用 GitHub Actions**
+- 每天自动签到
+- 自动识别重复签到，避免误判
+- 支持多账号
+- 支持 `glados.one` / `glados.network` / `glados.cloud`
+- 可选推送签到结果到 Telegram Bot
+- 依赖 GitHub Actions，可直接 Fork 使用
 
-------
+---
 
-## 📂 项目结构
+## 项目结构
 
-```
+```text
 .
-├── checkin.py                 # 签到脚本（不用动）
+├── checkin.py                 # 签到脚本
 └── .github/workflows/
-    └── glados.yml              # GitHub Actions 配置（不用动）
+    └── glados.yml             # GitHub Actions 配置
 ```
 
-------
+---
 
-## 🚀 使用教程
+## 使用教程
 
-### 第一步：Fork 本项目
+### 第一步：Fork 仓库
 
-1. 点击右上角 **Fork**
-2. Fork 到你自己的 GitHub 账号下
+1. 点击仓库右上角的 `Fork`
+2. 将仓库 Fork 到你自己的 GitHub 账号
 
-👉 后续所有操作都在你 **自己的仓库** 中完成
+后续所有配置都在你自己的仓库里完成。
 
-------
+---
 
 ### 第二步：获取 GLaDOS Cookie
 
-1. 打开浏览器，登录：https://glados.cloud
-2. 按 **F12** 打开开发者工具
-3. 找到：
-   - Chrome：`Application` → `Cookies`
-   - Firefox：`存储` → `Cookies`
-4. 选择 `glados.cloud`
-5. **复制完整 Cookie 内容**
+1. 打开 `https://glados.one`、`https://glados.network` 或 `https://glados.cloud` 中任意一个并登录
+2. 按 `F12` 打开开发者工具
+3. 在浏览器存储中找到当前登录站点对应的 Cookie
+4. 复制完整 Cookie 内容
 
-示例（示意）：
+示例：
 
-```
+```text
 koa:sess=xxxxxx; koa:sess.sig=yyyyyy
 ```
 
-⚠️ **必须是完整的一整段，不要只复制一半**
+注意必须复制完整 Cookie，不能只复制其中一个字段。
 
-------
+这三个域名本质上是同一个站点，脚本会自动尝试可用域名完成签到。
+
+---
 
 ### 第三步：添加 GitHub Secrets
 
 进入你 Fork 后的仓库：
 
-1. 点击 **Settings**
-2. 左侧选择 **Secrets and variables → Actions**
-3. 点击 **New repository secret**
+1. 点击 `Settings`
+2. 进入 `Secrets and variables` -> `Actions`
+3. 点击 `New repository secret`
 
-#### 添加第一个 Secret（必填）
+添加必填 Secret：
 
-- **Name**：`COOKIES`
-- **Value**：粘贴刚才复制的 Cookie
+- `COOKIES`：你的 GLaDOS Cookie
 
-点击 **Save**
+---
 
-------
+### 第四步：配置 Telegram Bot 推送（可选）
 
-### （可选）第四步：开启签到结果推送
+如果你希望收到签到通知，需要再配置两个 Secret：
 
-如果你想每天收到签到通知（可选）：
+- `TELEGRAM_BOT_TOKEN`：Telegram Bot 的 Token
+- `TELEGRAM_CHAT_ID`：接收消息的 Chat ID
 
-1. 注册 PushDeer：https://www.pushdeer.com
-2. 获取你的 `SENDKEY`
-3. 在 GitHub Secrets 中再添加一个：
+创建 Bot 的基本流程：
 
-- **Name**：`SENDKEY`
-- **Value**：你的 PushDeer key
+1. 在 Telegram 中找到 `@BotFather`
+2. 发送 `/newbot`，按提示创建机器人
+3. 记录返回的 Bot Token
+4. 给你的 Bot 发送一条消息
+5. 通过 Telegram Bot API 或其他方式获取当前会话的 Chat ID
 
-不填也没关系，只是不会推送。
+如果不配置这两个 Secret，脚本仍然可以签到，只是不会发送通知。
 
-------
+---
 
-## 👥 多账号如何添加？
+## 多账号配置
 
-### 规则很简单：
+多个账号的 Cookie 使用 `&` 连接，格式如下：
 
-> **多个账号的 Cookie，用 `&` 连接**
-
-示例：
-
-```
+```text
 cookie_账号1 & cookie_账号2 & cookie_账号3
 ```
 
-⚠️ 注意事项：
+注意：
 
 - 不要换行
-- 不要用逗号
-- 每个 cookie 都是完整的一段
+- 不要用逗号分隔
+- 每个 Cookie 都必须是完整的一整段
 
-------
+---
 
-## ⏰ 自动签到时间说明
+## 自动执行时间
 
-项目默认设置为：
+工作流默认配置为：
 
-```
+```text
 每天 UTC 04:00 自动运行
 ```
 
-换算成北京时间：
+换算为北京时间是每天中午 12:00。
 
-> 🕛 **每天中午 12 点自动签到**
-
-你无需做任何操作，它会每天自动运行。
+如果你想立即测试，也可以手动触发工作流中的 `workflow_dispatch`。
