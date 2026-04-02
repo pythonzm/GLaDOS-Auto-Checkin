@@ -4,7 +4,8 @@ import random
 import re
 import sys
 import time
-from typing import List, Tuple
+from decimal import Decimal, InvalidOperation
+from typing import List, Optional, Tuple
 
 import requests
 
@@ -103,7 +104,7 @@ def try_checkin(session: requests.Session, cookie: str, domains: List[str]) -> d
         if "token error" in message.lower():
             continue
 
-        status, is_success, is_fail, is_repeat = get_status_text(message)
+        status, is_success, is_fail, is_repeat = get_status_text(message, response_data)
         status_data = {}
         try:
             status_response = session.get(
@@ -189,10 +190,15 @@ def push_telegram(bot_token: str, chat_id: str, title: str, content: str) -> Non
         console_print(f"Telegram 推送异常: {exc}")
 
 
-def get_status_text(message: str) -> Tuple[str, bool, bool, bool]:
+def get_status_text(message: str, checkin_data: Optional[dict] = None) -> Tuple[str, bool, bool, bool]:
     """根据签到接口返回文案判断签到结果。"""
     message_lower = message.lower()
+    checkin_data = checkin_data or {}
+    if checkin_data.get("code") == 1 and checkin_data.get("list"):
+        return "✅ 成功", True, False, False
     if "checkin!" in message_lower and "get" in message_lower:
+        return "✅ 成功", True, False, False
+    if "observation logged" in message_lower or "return tomorrow" in message_lower:
         return "✅ 成功", True, False, False
     if "got" in message_lower:
         return "✅ 成功", True, False, False
@@ -201,11 +207,36 @@ def get_status_text(message: str) -> Tuple[str, bool, bool, bool]:
     return "❌ 失败", False, True, False
 
 
-def extract_reward(checkin_data: dict) -> str:
-    """优先提取积分，其次从消息里提取奖励天数。"""
+def format_decimal(value) -> str:
+    """格式化小数，去掉无意义的尾随 0。"""
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return str(value)
+    normalized = format(number.normalize(), "f")
+    return normalized.rstrip("0").rstrip(".") if "." in normalized else normalized
+
+
+def extract_points(checkin_data: dict) -> str:
+    """提取当前积分，优先使用签到明细中的余额。"""
+    entries = checkin_data.get("list") or []
+    for entry in entries:
+        if entry.get("asset") == "points" and entry.get("balance") is not None:
+            return format_decimal(entry.get("balance"))
+
     points = checkin_data.get("points")
     if points is not None:
-        return f"{points} 积分"
+        return format_decimal(points)
+
+    return "-"
+
+
+def extract_reward(checkin_data: dict) -> str:
+    """提取奖励信息，优先使用积分变化，其次从消息里提取奖励天数。"""
+    entries = checkin_data.get("list") or []
+    for entry in entries:
+        if entry.get("asset") == "points" and entry.get("change") is not None:
+            return f"{format_decimal(entry.get('change'))} 积分"
 
     message = str(checkin_data.get("message", ""))
     matched = re.search(r"get\s+(\d+)\s+day", message, re.IGNORECASE)
@@ -220,6 +251,7 @@ def build_account_summary(
     email: str,
     domain: str,
     status: str,
+    points: str,
     reward: str,
     days: str,
     message: str = "",
@@ -227,7 +259,7 @@ def build_account_summary(
     """格式化单个账号的汇总信息。"""
     summary = (
         f"{index}. {email} | {status} | 站点:{domain} | "
-        f"奖励:{reward} | 剩余天数:{days}"
+        f"积分:{points} | 奖励:{reward} | 剩余天数:{days}"
     )
     if message and status.startswith("❌"):
         return f"{summary} | 消息:{message}"
@@ -254,13 +286,14 @@ def main() -> None:
     for index, cookie in enumerate(cookies, start=1):
         email = "unknown"
         domain = "-"
+        points = "-"
         reward = "-"
         days = "-"
 
         result = try_checkin(session, cookie, domains)
         if not result:
             fail_count += 1
-            lines.append(build_account_summary(index, email, domain, "❌ 异常", reward, days))
+            lines.append(build_account_summary(index, email, domain, "❌ 异常", points, reward, days))
             time.sleep(random.uniform(1, 2))
             continue
 
@@ -272,6 +305,7 @@ def main() -> None:
         is_success = result["is_success"]
         is_fail = result["is_fail"]
         is_repeat = result["is_repeat"]
+        points = extract_points(checkin_data)
 
         if is_success:
             success_count += 1
@@ -287,7 +321,7 @@ def main() -> None:
         if left_days is not None:
             days = str(int(float(left_days)))
 
-        lines.append(build_account_summary(index, email, domain, status, reward, days, message))
+        lines.append(build_account_summary(index, email, domain, status, points, reward, days, message))
         time.sleep(random.uniform(1, 2))
 
     title = f"GLaDOS 签到完成 ✅{success_count} ❌{fail_count} 🔁{repeat_count}"
