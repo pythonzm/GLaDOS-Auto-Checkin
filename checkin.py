@@ -1,6 +1,8 @@
 import json
 import os
 import random
+import re
+import sys
 import time
 from typing import List, Tuple
 
@@ -28,6 +30,13 @@ def safe_json(response: requests.Response) -> dict:
         return response.json()
     except Exception:
         return {}
+
+
+def console_print(message: str) -> None:
+    """兼容 Windows 控制台编码的输出。"""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    sys.stdout.buffer.write(f"{message}\n".encode(encoding, errors="replace"))
+    sys.stdout.flush()
 
 
 def normalize_domain(domain: str) -> str:
@@ -151,7 +160,7 @@ def split_telegram_message(title: str, content: str) -> List[str]:
 def push_telegram(bot_token: str, chat_id: str, title: str, content: str) -> None:
     """通过 Telegram Bot 推送签到结果。"""
     if not bot_token or not chat_id:
-        print("⚠️ 未配置 Telegram Bot 推送，请设置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID")
+        console_print("未配置 Telegram Bot 推送，请设置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID")
         return
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -172,17 +181,19 @@ def push_telegram(bot_token: str, chat_id: str, title: str, content: str) -> Non
                 continue
 
             description = result.get("description", f"HTTP {response.status_code}")
-            print(f"⚠️ Telegram 推送失败: {description}")
+            console_print(f"Telegram 推送失败: {description}")
             return
 
-        print("✅ Telegram 推送成功")
+        console_print("Telegram 推送成功")
     except Exception as exc:
-        print(f"⚠️ Telegram 推送异常: {exc}")
+        console_print(f"Telegram 推送异常: {exc}")
 
 
 def get_status_text(message: str) -> Tuple[str, bool, bool, bool]:
     """根据签到接口返回文案判断签到结果。"""
     message_lower = message.lower()
+    if "checkin!" in message_lower and "get" in message_lower:
+        return "✅ 成功", True, False, False
     if "got" in message_lower:
         return "✅ 成功", True, False, False
     if "repeat" in message_lower or "already" in message_lower:
@@ -190,14 +201,37 @@ def get_status_text(message: str) -> Tuple[str, bool, bool, bool]:
     return "❌ 失败", False, True, False
 
 
+def extract_reward(checkin_data: dict) -> str:
+    """优先提取积分，其次从消息里提取奖励天数。"""
+    points = checkin_data.get("points")
+    if points is not None:
+        return f"{points} 积分"
+
+    message = str(checkin_data.get("message", ""))
+    matched = re.search(r"get\s+(\d+)\s+day", message, re.IGNORECASE)
+    if matched:
+        return f"{matched.group(1)} 天"
+
+    return "-"
+
+
 def build_account_summary(
-    index: int, email: str, domain: str, status: str, points: str, days: str
+    index: int,
+    email: str,
+    domain: str,
+    status: str,
+    reward: str,
+    days: str,
+    message: str = "",
 ) -> str:
     """格式化单个账号的汇总信息。"""
-    return (
+    summary = (
         f"{index}. {email} | {status} | 站点:{domain} | "
-        f"积分:{points} | 剩余天数:{days}"
+        f"奖励:{reward} | 剩余天数:{days}"
     )
+    if message and status.startswith("❌"):
+        return f"{summary} | 消息:{message}"
+    return summary
 
 
 def main() -> None:
@@ -220,19 +254,20 @@ def main() -> None:
     for index, cookie in enumerate(cookies, start=1):
         email = "unknown"
         domain = "-"
-        points = "-"
+        reward = "-"
         days = "-"
 
         result = try_checkin(session, cookie, domains)
         if not result:
             fail_count += 1
-            lines.append(build_account_summary(index, email, domain, "❌ 异常", points, days))
+            lines.append(build_account_summary(index, email, domain, "❌ 异常", reward, days))
             time.sleep(random.uniform(1, 2))
             continue
 
         domain = result["domain"]
         status = result["status"]
         checkin_data = result["checkin_data"]
+        message = str(checkin_data.get("message", ""))
         status_data = result.get("status_data") or {}
         is_success = result["is_success"]
         is_fail = result["is_fail"]
@@ -240,24 +275,25 @@ def main() -> None:
 
         if is_success:
             success_count += 1
-            points = str(checkin_data.get("points", "-"))
+            reward = extract_reward(checkin_data)
         if is_fail:
             fail_count += 1
         if is_repeat:
             repeat_count += 1
+            reward = extract_reward(checkin_data)
 
         email = status_data.get("email", email)
         left_days = status_data.get("leftDays")
         if left_days is not None:
             days = str(int(float(left_days)))
 
-        lines.append(build_account_summary(index, email, domain, status, points, days))
+        lines.append(build_account_summary(index, email, domain, status, reward, days, message))
         time.sleep(random.uniform(1, 2))
 
     title = f"GLaDOS 签到完成 ✅{success_count} ❌{fail_count} 🔁{repeat_count}"
     content = "\n".join(lines)
 
-    print(content)
+    console_print(content)
     push_telegram(bot_token, chat_id, title, content)
 
 
