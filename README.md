@@ -116,4 +116,4 @@ cookie_账号1 & cookie_账号2 & cookie_账号3
 
 换算为北京时间是每天中午 12:00。
 
-如果你想立即测试，也可以手动触发工作流中的 `workflow_dispatch`。
+如果你想立即测试，也可以手动触发工作流中的 `workflow_dispatch`
