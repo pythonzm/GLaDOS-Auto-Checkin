@@ -5,7 +5,38 @@ on:
   schedule:
     - cron: '0 4 * * *'
 
+permissions:
+  contents: read
+
 jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: keepalive-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Keep scheduled workflows active
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          last_commit=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          if (( now - last_commit >= 45 * 24 * 60 * 60 )); then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit --allow-empty -m "chore: keep scheduled workflows active"
+            git push origin "HEAD:${DEFAULT_BRANCH}"
+          else
+            echo "Recent repository activity; no keepalive commit needed."
+          fi
+
   checkin:
     runs-on: ubuntu-latest
 
