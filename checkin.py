@@ -105,6 +105,12 @@ def try_checkin(session: requests.Session, cookie: str, domains: List[str]) -> d
             continue
 
         status, is_success, is_fail, is_repeat = get_status_text(message, response_data)
+        if "没有权限" in message or response.status_code in (401, 403):
+            console_print(
+                f"站点:{domain} | HTTP {response.status_code} | 登录校验失败。"
+                "请重新登录该站点，复制请求头中的完整 Cookie 并更新 COOKIES；"
+                "可通过 GLADOS_SITE 优先选择获取 Cookie 的站点。"
+            )
         status_data = {}
         try:
             status_response = session.get(
@@ -266,7 +272,7 @@ def build_account_summary(
     return summary
 
 
-def main() -> None:
+def main() -> int:
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     cookies_env = os.getenv("COOKIES", "")
@@ -274,8 +280,9 @@ def main() -> None:
     domains = get_candidate_domains()
 
     if not cookies:
+        console_print("❌ 未检测到 COOKIES")
         push_telegram(bot_token, chat_id, "GLaDOS 签到", "❌ 未检测到 COOKIES")
-        return
+        return 1
 
     session = requests.Session()
     success_count = 0
@@ -329,7 +336,8 @@ def main() -> None:
 
     console_print(content)
     push_telegram(bot_token, chat_id, title, content)
+    return 1 if fail_count else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

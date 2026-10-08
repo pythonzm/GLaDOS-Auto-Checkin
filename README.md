@@ -42,8 +42,8 @@
 
 1. 打开 `https://glados.one`、`https://glados.network` 或 `https://glados.cloud` 中任意一个并登录
 2. 按 `F12` 打开开发者工具
-3. 在浏览器存储中找到当前登录站点对应的 Cookie
-4. 复制完整 Cookie 内容
+3. 在开发者工具的 `Network`（网络）面板中刷新页面，找到 `/api/user/status` 请求
+4. 从该请求的 `Request Headers`（请求标头）中复制完整的 `Cookie` 值，不包含 `Cookie:` 前缀
 
 示例：
 
@@ -53,7 +53,9 @@ koa:sess=xxxxxx; koa:sess.sig=yyyyyy
 
 注意必须复制完整 Cookie，不能只复制其中一个字段。
 
-这三个域名本质上是同一个站点，脚本会自动尝试可用域名完成签到。
+脚本会依次尝试这三个域名，但不同域名的登录状态不一定通用。
+建议在仓库 `Settings → Secrets and variables → Actions → Variables` 中添加
+`GLADOS_SITE`，值填写获取 Cookie 时使用的域名，例如 `glados.one`，脚本会优先尝试该站点。
 
 ---
 
@@ -105,6 +107,16 @@ cookie_账号1 & cookie_账号2 & cookie_账号3
 - 每个 Cookie 都必须是完整的一整段
 
 ---
+
+## 签到失败排查
+
+如果返回 `没有权限`，说明该次请求未通过站点的权限校验；常见原因是 Cookie
+过期、不完整或与登录站点不匹配。请重新登录，在 Network 面板确认
+`/api/user/status` 能返回账号信息，再复制完整请求 Cookie 更新仓库的 `COOKIES` Secret，
+并将 `GLADOS_SITE` 设为同一域名。不要将 Cookie 粘贴到公开日志或 Issue。
+
+任意账号签到失败或缺少 `COOKIES` 时，脚本会以退出码 1 结束，使 Actions 显示失败；
+所有账号成功或已签到时退出码为 0。Telegram 推送成功只代表通知已送达。
 
 ## 自动执行时间
 

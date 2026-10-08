@@ -59,3 +59,4 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           COOKIES: ${{ secrets.COOKIES }}
+          GLADOS_SITE: ${{ vars.GLADOS_SITE }}
