@@ -1,24 +1,31 @@
-# GLaDOS 自动签到 
+# 📌 GLaDOS 自动签到
 
-这是一个基于 **GitHub Actions** 的 **GLaDOS 自动签到脚本**。
-无需服务器，也不需要额外常驻环境，仓库工作流会按计划自动执行签到。
+一个基于 **GitHub Actions** 的 **GLaDOS 自动签到脚本**。
 
----
-
-## 功能说明
-
-- 每天自动签到
-- 自动识别重复签到，避免误判
-- 支持多账号
-- 支持 `glados.one` / `glados.network` / `glados.cloud`
-- 可选推送签到结果到 Telegram Bot
-- 依赖 GitHub Actions，可直接 Fork 使用
+**无需服务器、无需编程基础**，每天自动帮你签到。
 
 ---
 
-## 项目结构
+## ✨ 功能特性
 
-```text
+- ✅ 每天自动签到，已签到自动识别
+- 👥 支持多账号（`|||`、`&` 或换行连接）
+- 📊 查询总积分和剩余天数
+- 📬 8 种推送渠道：PushDeer / Server酱 / Telegram / PushPlus / 钉钉 / 飞书 / 企业微信 / 云湖
+- 🔄 网络请求自动重试（指数退避）
+- 🔒 日志脱敏（邮箱/Cookie 自动隐藏）
+- ✅ Cookie 结构预验证（前缀无关，自动兼容 `koa:` / `gld:` 等任意前缀）
+- 🔧 每天独立检查仓库活动，45 天无提交时自动空提交保活
+- 支持 `glados.cloud` / `glados.one` / `glados.network` 自动切换；Actions Variables 的 `GLADOS_SITE` 可指定优先域名
+- 保留积分明细、奖励展示，任意账号失败时 Actions 标红
+- 💎 积分自动兑换（可选，消耗积分兑换会员天数）
+- 🆓 完全免费
+
+---
+
+## 📂 项目结构
+
+```
 .
 ├── checkin.py                 # 签到脚本
 └── .github/workflows/
@@ -27,35 +34,34 @@
 
 ---
 
-## 使用教程
+## 🚀 使用教程
 
-### 第一步：Fork 仓库
+### 第一步：Fork 本项目
 
-1. 点击仓库右上角的 `Fork`
-2. 将仓库 Fork 到你自己的 GitHub 账号
-
-后续所有配置都在你自己的仓库里完成。
+点击右上角 **Fork**，Fork 到你自己的 GitHub 账号下。
 
 ---
 
 ### 第二步：获取 GLaDOS Cookie
 
-1. 打开 `https://glados.one`、`https://glados.network` 或 `https://glados.cloud` 中任意一个并登录
-2. 按 `F12` 打开开发者工具
-3. 在开发者工具的 `Network`（网络）面板中刷新页面，找到 `/api/user/status` 请求
-4. 从该请求的 `Request Headers`（请求标头）中复制完整的 `Cookie` 值，不包含 `Cookie:` 前缀
+1. 打开浏览器，登录 https://glados.cloud
+2. 按 **F12** 打开开发者工具
+3. 在 `Network` 面板刷新页面，找到 `/api/user/status` 请求
+4. 复制 `Request Headers` 中完整的 `Cookie` 值
 
-示例：
-
-```text
-koa:sess=xxxxxx; koa:sess.sig=yyyyyy
+示例（官网当前签发的是 `gld:` 前缀）：
+```
+gld:sess=xxxxxx; gld:sess.sig=yyyyyy
 ```
 
-注意必须复制完整 Cookie，不能只复制其中一个字段。
+旧版签发的 `koa:sess=xxxxxx; koa:sess.sig=yyyyyy` 同样支持，**两种前缀任选其一，无需手动转换**。
 
-脚本会依次尝试这三个域名，但不同域名的登录状态不一定通用。
-建议在仓库 `Settings → Secrets and variables → Actions → Variables` 中添加
-`GLADOS_SITE`，值填写获取 Cookie 时使用的域名，例如 `glados.one`，脚本会优先尝试该站点。
+⚠️ **必须是完整的一整段**，且 `sess` 与 `sess.sig` 两个字段**必须同时存在、前缀一致**。
+只复制其中一个会导致签到失败（脚本会明确指出缺少哪个字段）。
+
+> 💡 脚本采用**结构校验**：只校验「`<前缀>:sess` 与同前缀 `:sess.sig` 成对」，
+> 不写死具体前缀。因此 GLaDOS 即便再次变更前缀名，脚本也能自动识别，无需修改代码。
+> **不要把 `gld:` 改成 `koa:`** —— 改前缀会让服务端无法识别 session，导致「没有权限」。
 
 ---
 
@@ -63,72 +69,171 @@ koa:sess=xxxxxx; koa:sess.sig=yyyyyy
 
 进入你 Fork 后的仓库：
 
-1. 点击 `Settings`
-2. 进入 `Secrets and variables` -> `Actions`
-3. 点击 `New repository secret`
+1. **Settings** → **Secrets and variables** → **Actions** → **Secrets** 标签页
+2. 点击 **New repository secret**
+3. 添加：
+   - **Name**：`COOKIES`
+   - **Value**：粘贴刚才复制的 Cookie
+4. 点击 **Save**
 
-添加必填 Secret：
-
-- `COOKIES`：你的 GLaDOS Cookie
-
----
-
-### 第四步：配置 Telegram Bot 推送（可选）
-
-如果你希望收到签到通知，需要再配置两个 Secret：
-
-- `TELEGRAM_BOT_TOKEN`：Telegram Bot 的 Token
-- `TELEGRAM_CHAT_ID`：接收消息的 Chat ID
-
-创建 Bot 的基本流程：
-
-1. 在 Telegram 中找到 `@BotFather`
-2. 发送 `/newbot`，按提示创建机器人
-3. 记录返回的 Bot Token
-4. 给你的 Bot 发送一条消息
-5. 通过 Telegram Bot API 或其他方式获取当前会话的 Chat ID
-
-如果不配置这两个 Secret，脚本仍然可以签到，只是不会发送通知。
+建议将 Cookie 放在 Secrets 中；兼容读取 Variables 中的 `COOKIES`，Secrets 优先。变量名必须是 `COOKIES`。
 
 ---
 
-## 多账号配置
+### 第四步：（可选）配置推送
 
-多个账号的 Cookie 使用 `&` 连接，格式如下：
+在 GitHub Secrets 中添加对应的环境变量：
 
-```text
-cookie_账号1 & cookie_账号2 & cookie_账号3
+| 渠道 | 必填环境变量 | 可选 |
+|------|-------------|------|
+| PushDeer | `SENDKEY` | - |
+| Server酱 | `SERVERCHAN_KEY` | - |
+| Telegram | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | 兼容上游 `TG_BOT_TOKEN` + `TG_CHAT_ID`；原配置优先，分段发送完整结果 |
+| PushPlus | `PUSHPLUS_TOKEN` | - |
+| 钉钉机器人 | `DINGTALK_WEBHOOK` | `DINGTALK_SECRET` |
+| 飞书机器人 | `FEISHU_WEBHOOK` | `FEISHU_SECRET` |
+| 企业微信机器人 | `WECOM_BOT_WEBHOOK` | - |
+| 云湖机器人 | `YUNHU_TOKEN` + `YUNHU_RECV_ID` | `YUNHU_RECV_TYPE` |
+
+> 🔑 **钉钉 / 飞书加签说明**：若机器人启用了「加签」校验，则 `DINGTALK_WEBHOOK` + `DINGTALK_SECRET`（或 `FEISHU_WEBHOOK` + `FEISHU_SECRET`）**必须同时配置**。只配 webhook 不配 secret 时，脚本会发送无签名请求并给出告警，加签机器人将鉴权失败。
+
+---
+
+### 第五步：（可选）积分自动兑换
+
+在 GitHub Secrets 中添加 `EXCHANGE_PLAN`（或 `GLADOS_EXCHANGE_PLAN`，二选一）即可启用自动兑换积分功能。**不配置则默认不兑换**，不影响任何现有签到逻辑。
+
+| 配置值 | 消耗积分 | 兑换天数 |
+|--------|---------|---------|
+| `plan100` | 100 积分 | 10 天 |
+| `plan200` | 200 积分 | 30 天 |
+| `plan500` | 500 积分 | 100 天 |
+
+机制说明：
+
+- 每次签到后，仅在**总积分 ≥ 计划所需积分**时才调用兑换接口，否则自动跳过（不会浪费积分）。
+- 兑换结果会附加到签到日志行末尾，例如：`| 兑换:🎁 兑换成功(+30天)`。
+- 兑换失败 / 异常**不影响**签到结果与运行退出码。
+
+---
+
+## 👥 多账号配置
+
+多个账号的 Cookie 用 `|||`、`&` 或**换行**连接（三种分隔符均可混用，推荐使用 `|||` 以避免与 Cookie 值冲突）：
+
+```
+cookie_账号1 ||| cookie_账号2 ||| cookie_账号3
 ```
 
-注意：
+或
 
-- 不要换行
-- 不要用逗号分隔
-- 每个 Cookie 都必须是完整的一整段
+```
+cookie_账号1
+cookie_账号2
+cookie_账号3
+```
+
+⚠️ Cookie 值本身不得包含 `|||`、`&` 或换行符，否则会被错误拆分。推荐使用 `|||` 作为分隔符，因为 Cookie 值中几乎不可能出现该字符串。
 
 ---
 
-## 签到失败排查
+## ⏰ 签到时间
 
-如果返回 `没有权限`，说明该次请求未通过站点的权限校验；常见原因是 Cookie
-过期、不完整或与登录站点不匹配。请重新登录，在 Network 面板确认
-`/api/user/status` 能返回账号信息，再复制完整请求 Cookie 更新仓库的 `COOKIES` Secret，
-并将 `GLADOS_SITE` 设为同一域名。不要将 Cookie 粘贴到公开日志或 Issue。
+每天 **UTC 04:00**（北京时间 **中午 12 点**）自动运行。
 
-任意账号签到失败或缺少 `COOKIES` 时，脚本会以退出码 1 结束，使 Actions 显示失败；
-所有账号成功或已签到时退出码为 0。Telegram 推送成功只代表通知已送达。
+---
 
-## 自动执行时间
+## 📋 签到结果
 
-工作流默认配置为：
+| 状态 | 说明 |
+|------|------|
+| ✅ 成功 | 签到成功，显示获得积分 |
+| 🔄 已签到 | 今日已签到过 |
+| ❌ 失败 | 签到失败，显示原因 |
 
-```text
-每天 UTC 04:00 自动运行
-```
+---
 
-换算为北京时间是每天中午 12:00。
+## ❓ 常见问题
 
-如果你想立即测试，也可以手动触发工作流中的 `workflow_dispatch`
+**Q: 签到提示「没有权限」/ 鉴权失败？**
+
+A: 说明 Cookie 已失效或复制不完整，**请重新登录 GLaDOS 获取最新 Cookie 并更新 Secrets 中的 `COOKIES`**。
+若日志提示「会话字段不成对」或输出了「实际键名」，则多为复制遗漏了 `sess` / `sess.sig` 其中之一，重新完整复制即可。
+
+> 💡 脚本会自动识别 `koa:` / `gld:` 等任意前缀，**无需手动修改前缀**；反之，手动把前缀改错（如把 `gld:` 改成 `koa:`）会让服务端无法识别 session。
+
+**Q: Cookie 有有效期吗？**
+
+A: 有。Cookie 会随会话过期，需重新登录获取最新 Cookie 并更新 Secrets。
+
+**Q: Actions 被暂停了？**
+
+A: 项目每天检查仓库活动，45 天无提交时自动保活。已停用的工作流需先在 Actions 点击 `Enable workflow`，再手动运行。
+
+**Q: 日志中的邮箱为什么显示不完整？**
+
+A: 出于隐私保护，邮箱会自动脱敏（如 `te***t@example.com`）。
+
+**Q: 可以同时配置多个推送渠道吗？**
+
+A: 可以，配置多个 Secrets 即可同时推送。
+
+---
+
+## 🔄 更新日志
+
+### v2.1.1
+
+**问题修复**
+- 修复 GLaDOS 变更 Cookie 前缀（`koa:sess` → `gld:sess`）导致的签到失败：`validate_cookie` 原先把 `koa:sess` 写死校验，新版 Cookie 被误判为「缺少必要字段」，签到请求根本未发出，表现为「❌ 失败(没有权限)」
+
+**优化改进**
+- Cookie 校验改为**前缀无关的结构校验**：只校验「`<任意前缀>:sess` 与同前缀 `:sess.sig` 成对」，不再枚举任何前缀名——GLaDOS 未来再次变更前缀通常无需改代码即可自动适配
+- 新增 `normalize_cookie`：自动剥离粘贴时混入的首尾引号、空白与 `Cookie:` 头名
+- 新增自诊断日志：校验成功时打印识别到的会话前缀；失败时输出**实际解析到的键名**，前缀变化可一眼定位
+- 服务端鉴权失败（没有权限 / 未登录等）与格式错误分开提示，明确引导「重新获取 Cookie」
+- `glados.yml`：`COOKIES` 支持 `secrets` 与 `vars` 双路读取
+
+---
+
+### v2.1.0
+
+**功能新增**
+- 新增积分自动兑换功能（#9，可选配置 `EXCHANGE_PLAN` / `GLADOS_EXCHANGE_PLAN`，支持 plan100/plan200/plan500 三档策略；默认关闭，不影响现有签到）
+- 兑换请求单次尝试不重试（非幂等操作，避免响应丢失后重复扣积分）
+
+---
+
+### v2.0.0
+
+**功能新增**
+- 新增 Telegram Bot 推送
+- 新增 PushPlus（推送加）推送
+- 新增钉钉机器人推送（支持加签验证）
+- 新增飞书机器人推送（支持加签验证）
+- 新增企业微信机器人推送
+- 新增云湖机器人推送
+- 新增总积分查询功能
+- 新增网络请求自动重试机制（指数退避）
+- 新增 Cookie 格式预验证
+- 新增日志脱敏处理（邮箱/Cookie 自动隐藏）
+- 新增每月自动空提交保活机制
+
+**问题修复**
+- 修复 PushPlus 推送域名问题
+- 修复飞书机器人加签算法
+
+**优化改进**
+- Python 版本升级至 3.11
+- 多账号间请求增加随机延迟
+- GitHub Actions 添加超时和并发控制
+- 代码整合为单文件，简化部署
+
+---
+
+## 📄 许可证
+
+MIT License
 
 ## 防止工作流因长期无活动而停用
 
